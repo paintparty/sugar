@@ -29,3 +29,4 @@ node_modules/*
 .fireworks/results/
 .nbb/
 .calva/repl.calva-repl
+.jolt

@@ -1,52 +1,60 @@
 (ns tasks.deps
   "Switches supports-color between the local checkout and the published
-   version, in deps.edn, bb.edn, nbb.edn and shadow-cljs.edn."
+   version, in deps.edn, bb.edn, nbb.edn and shadow-cljs.edn. Each file holds
+   both, and #_ discards the one not in use. The task only moves the #_, so the
+   path and version are whatever the files say."
   (:require [clojure.string :as str]))
-
-(def ^:private local-root "../../cljc/supports-color")
-(def ^:private version "0.1.0-SNAPSHOT")
-
-(def ^:private local-coord (str "{:local/root \"" local-root "\"}"))
-(def ^:private published-coord (str "{:mvn/version \"" version "\"}"))
 
 (def ^:private deps-files ["deps.edn" "bb.edn" "nbb.edn"])
 
-;; In deps.edn, bb.edn and nbb.edn: the key and its coordinate map.
-(def ^:private coord-re
-  #"(io\.github\.paintparty/supports-color\s+)\{[^}]*\}")
+;; In deps.edn, bb.edn and nbb.edn: the key, the local coordinate, then the
+;; published one.
+(def ^:private entry-re
+  #"(io\.github\.paintparty/supports-color\s+)(?:#_)?(\{:local/root[^}]*\})(\s+)(?:#_)?(\{:mvn/version[^}]*\})")
 
-;; In shadow-cljs.edn both entries are present, and #_ discards one.
+;; In shadow-cljs.edn: the checkout's src in :source-paths, and the published
+;; version in :dependencies.
 (def ^:private shadow-file "shadow-cljs.edn")
-(def ^:private shadow-source-path (str "\"" local-root "/src\""))
-(def ^:private shadow-dep (str "[io.github.paintparty/supports-color \"" version "\"]"))
+(def ^:private shadow-source-path-re #"(?:#_)?(\"[^\"]*supports-color/src\")")
+(def ^:private shadow-dep-re #"(?:#_)?(\[io\.github\.paintparty/supports-color \"[^\"]*\"\])")
 
-(defn- set-coord! [file coord]
-  (let [s  (slurp file)
-        s' (str/replace s coord-re (fn [[_ before]] (str before coord)))]
-    (when (= s s')
-      (when-not (str/includes? s coord)
-        (throw (ex-info (str file ": no supports-color entry found") {}))))
-    (spit file s')))
+(defn- discard-if [discard? form]
+  (str (when discard? "#_") form))
 
-(defn- discard
-  "s with #_ before the first occurrence of form, if it has none."
-  [s form]
-  (if (str/includes? s (str "#_" form)) s (str/replace-first s form (str "#_" form))))
+(defn- replace-once
+  "s with the single match of re replaced by (f match). Throws if re matches
+   anything other than once."
+  [file s re f]
+  (let [n (count (re-seq re s))]
+    (when-not (= 1 n)
+      (throw (ex-info (str file ": expected 1 supports-color entry matching " re ", found " n) {})))
+    (str/replace s re f)))
 
-(defn- keep-form
-  "s without #_ before form."
-  [s form]
-  (str/replace s (str "#_" form) form))
+(defn- set-entry! [file target]
+  (let [local? (= target :local)]
+    (spit file
+          (replace-once file (slurp file) entry-re
+                        (fn [[_ before local-coord ws published-coord]]
+                          (str before
+                               (discard-if (not local?) local-coord)
+                               ws
+                               (discard-if local? published-coord)))))))
 
 (defn- set-shadow! [target]
-  (let [s  (slurp shadow-file)
-        _  (doseq [form [shadow-source-path shadow-dep]]
-             (when-not (str/includes? s form)
-               (throw (ex-info (str shadow-file ": " form " not found") {}))))
-        s' (if (= target :local)
-             (-> s (keep-form shadow-source-path) (discard shadow-dep))
-             (-> s (discard shadow-source-path) (keep-form shadow-dep)))]
-    (spit shadow-file s')))
+  (let [local? (= target :local)]
+    (spit shadow-file
+          (-> (slurp shadow-file)
+              (as-> s (replace-once shadow-file s shadow-source-path-re
+                                    (fn [[_ form]] (discard-if (not local?) form))))
+              (as-> s (replace-once shadow-file s shadow-dep-re
+                                    (fn [[_ form]] (discard-if local? form))))))))
+
+(defn- active-coord
+  "The supports-color coordinate deps.edn uses, as a string."
+  []
+  (let [s                                 (slurp "deps.edn")
+        [_ _ local-coord _ published-coord] (re-find entry-re s)]
+    (if (str/includes? s (str "#_" local-coord)) published-coord local-coord)))
 
 (def ^:private files (conj deps-files shadow-file))
 
@@ -56,12 +64,8 @@
   [target]
   (let [before (mapv slurp files)]
     (doseq [f deps-files]
-      (set-coord! f (if (= target :local) local-coord published-coord)))
+      (set-entry! f target))
     (set-shadow! target)
-    (let [where (if (= target :local)
-                  (str "the local checkout, " local-root)
-                  (str "the published version, " version))]
-      (println (if (= before (mapv slurp files))
-                 (str "supports-color is already " where ". Nothing changed.")
-                 (str "supports-color is now " where ", in "
-                      (str/join ", " files) "."))))))
+    (println (if (= before (mapv slurp files))
+               (str "supports-color is already " (active-coord) ". Nothing changed.")
+               (str "supports-color is now " (active-coord) ", in " (str/join ", " files) ".")))))

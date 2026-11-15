@@ -133,7 +133,9 @@
   (is (= 0 (browser/sgr-count "")))
   (is (= 0 (browser/sgr-count nil))))
 
-#?(:clj
+;; Jolt has no java.util.Locale, so this JVM locale check runs on the JVM and bb only.
+#?(:jolt nil
+   :clj
    (deftest hex-alpha-does-not-depend-on-locale
      (let [default (java.util.Locale/getDefault)]
        (try

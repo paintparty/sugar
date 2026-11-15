@@ -1,12 +1,11 @@
 {:source-paths ["src" "test" "bench" "dev/browser/src"
                 ;; supports-color comes from the local checkout here, or the
-                ;; published version in :dependencies. Switch with
-                ;; bb deps:local or bb deps:published.
-                "../../cljc/supports-color/src"]
+                ;; published version in :dependencies. bb deps:local and
+                ;; bb deps:published move the #_.
+                #_"../supports-color/src"]
  :dependencies [[org.clojure/test.check "1.1.3"]
                 [io.github.paintparty/fireworks "0.21.3"]
-                [io.github.paintparty/js-runtime-detection "0.1.0-SNAPSHOT"]
-                #_[io.github.paintparty/supports-color "0.1.0-SNAPSHOT"]]
+                [io.github.paintparty/supports-color "0.1.1"]]
  :builds
  {:test {:target    :node-test
          :output-to "out/test/node-tests.js"

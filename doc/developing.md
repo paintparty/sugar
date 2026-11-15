@@ -29,9 +29,11 @@ $ bb visual:platforms   # detected profile on nbb, Node, Babashka and the JVM
 ## supports-color
 
 ```
-$ bb deps:local       # use the checkout at ../../cljc/supports-color
+$ bb deps:local       # use the checkout at ../supports-color
 $ bb deps:published   # use the published version
 ```
+
+deps.edn, bb.edn, nbb.edn and shadow-cljs.edn each name both the checkout and the published version, and `#_` discards the one not in use. The tasks only move the `#_`. To change the published version, edit it in all 4 files.
 
 <br />
 

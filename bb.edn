@@ -1,0 +1,224 @@
+{:paths ["src" "bb"]
+ :deps  {;; The local checkout or the published version. Switch with bb deps:local or bb deps:published.
+         io.github.paintparty/supports-color {:local/root "../../cljc/supports-color"}}
+ :tasks
+ {:requires ([tasks.deps :as deps]
+             [tasks.docs :as docs]
+             [tasks.tuner :as tuner]
+             [tasks.visual :as visual])
+
+  ;; Test
+  ;; ---------------------------------------------------------------------------
+  test
+  {:doc  "Run the test suite on the JVM."
+   :task (clojure "-M:test" "-m" "cognitect.test-runner"
+                  "-n" "sugar.styled-test" "-n" "sugar.snapshot-test"
+                  "-n" "sugar.regression-test" "-n" "sugar.property-test" "-n" "sugar.behavior-test")}
+
+  test:bb
+  {:doc         "Run the test suite with Babashka to check compatibility."
+   :extra-paths ["test"]
+   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
+                                                       :git/sha "dfb30dd"}
+                 org.clojure/test.check               {:mvn/version "1.1.3"}}
+   :exec-args   {:nses [sugar.styled-test sugar.snapshot-test sugar.regression-test sugar.property-test sugar.behavior-test]}
+   :task        (exec 'cognitect.test-runner.api/test)}
+
+  test:node
+  {:doc  "Compile the test suite with shadow-cljs and run it on Node. Requires Node.js and npx."
+   :task (do (shell "npx" "shadow-cljs" "compile" "test")
+             (shell "node" "out/test/node-tests.js"))}
+
+  test:nbb
+  {:doc  "Run the test suite under nbb, except sugar.property-test (test.check does not load in nbb). Requires Node.js and npx (fetches nbb on first run). nbb reads supports-color from nbb.edn."
+   :task (shell "npx" "--yes" "nbb" "-cp" "src:test" "test/sugar/nbb_runner.cljs")}
+
+  test:coverage
+  {:doc  "Run the JVM test suite with cloverage. The report is in target/coverage/index.html."
+   :task (clojure "-M:coverage")}
+
+  test:all
+  {:doc     "Run the test suite on the JVM, Babashka, Node, and nbb."
+   :depends [test test:bb test:node test:nbb]}
+
+  test:generate
+  {:doc  "Regenerate test/sugar/styled_test.cljc from script/generate_tests.bb."
+   :task (shell "bb" "script/generate_tests.bb")}
+
+  test:fresh
+  {:doc     "Regenerate the test suite, then run test:all."
+   :depends [test:generate test:all]}
+
+  test:snapshot
+  {:doc  "Rewrite test/sugar/snapshots.cljc from the current output of the cases in test/sugar/snapshot_cases.cljc. Review the diff before committing."
+   :task (clojure "-M:test" "-m" "sugar.snapshot-gen")}
+
+  ;; Visual
+  ;; ---------------------------------------------------------------------------
+  ;; Print output for a person to look at, on Babashka. The snapshot tests
+  ;; already check that every platform emits the same escape codes.
+  ;; visual:platforms shows what each runtime detects in this terminal.
+  visual:palette
+  {:doc         "Print the palette grids and the text decorations."
+   :extra-paths ["test"]
+   :task        (visual/run "palette")}
+
+  visual:samples
+  {:doc         "Print every generated sample: rendered sample, opts, and case label."
+   :extra-paths ["test"]
+   :task        (visual/run "samples")}
+
+  visual:warnings
+  {:doc         "Print one warning box per kind of invalid option."
+   :extra-paths ["test"]
+   :task        (visual/run "warnings")}
+
+  visual:all
+  {:doc         "Print the palette, samples and warnings."
+   :extra-paths ["test"]
+   :task        (visual/run "palette" "samples" "warnings")}
+
+  visual:platforms
+  {:doc         "Print the detected profile (color level, polarity, palette variants) on nbb, Node, Babashka and the JVM."
+   :extra-paths ["test"]
+   :task        (visual/run-all-platforms "platforms")}
+
+  ;; Bench
+  ;; ---------------------------------------------------------------------------
+  ;; Each runtime runs the scenarios in bench/sugar/bench.cljc twice, at color
+  ;; level 3 and level 1. CLITHEME=dark skips the terminal query.
+  bench:jvm
+  {:doc  "Run the benchmarks on the JVM with criterium. Takes several minutes."
+   :task (doseq [level ["3" "1"]]
+           (clojure {:extra-env {"FORCE_COLOR" level "CLITHEME" "dark"}}
+                    "-M:bench" "-m" "sugar.bench-criterium"))}
+
+  bench:bb
+  {:doc  "Run the benchmarks on Babashka with a timed loop."
+   :task (doseq [level ["3" "1"]]
+           (shell {:extra-env {"FORCE_COLOR" level "CLITHEME" "dark"}}
+                  "bb" "-bench:bb-run"))}
+
+  -bench:bb-run
+  {:extra-paths ["bench"]
+   :requires    ([sugar.bench])
+   :task        (sugar.bench/-main)}
+
+  bench:node
+  {:doc  "Compile the benchmarks with shadow-cljs (advanced optimizations) and run them on Node with a timed loop."
+   :task (do (shell "npx" "shadow-cljs" "release" "bench")
+             (doseq [level ["3" "1"]]
+               (shell {:extra-env {"FORCE_COLOR" level "CLITHEME" "dark"}}
+                      "node" "out/bench/bench.js")))}
+
+  bench:load
+  {:doc  "Time (require 'sugar.core) in a fresh JVM and a fresh Babashka, 5 runs each."
+   :task (doseq [[runtime cmd] [["JVM" ["clojure" "-M:bench" "-e"]]
+                                ["Babashka" ["bb" "-e"]]]]
+           (println (str "\n" runtime))
+           (dotimes [_ 5]
+             (apply shell {:extra-env {"FORCE_COLOR" "3" "CLITHEME" "dark"}}
+                    (conj cmd (str "(let [t (System/nanoTime)] (require 'sugar.core)"
+                                   " (let [l (- (System/nanoTime) t) t2 (System/nanoTime)]"
+                                   " ((requiring-resolve 'sugar.core/styled) \"x\" {:color \"red\"})"
+                                   " (println (format \"require %.1f ms, first styled call %.1f ms\""
+                                   " (/ l 1e6) (/ (- (System/nanoTime) t2) 1e6)))))")))))}
+
+  bench:all
+  {:doc     "Run bench:load, bench:bb, bench:node and bench:jvm."
+   :depends [bench:load bench:bb bench:node bench:jvm]}
+
+  ;; Tuner
+  ;; ---------------------------------------------------------------------------
+  ;; dev/tuner/index.html edits dev/tuner/palette.json. See dev/tuner/README.md.
+  tuner
+  {:doc  "Serve the palette tuner at http://localhost:9631 and open it. Save writes dev/tuner/palette.json."
+   :task (tuner/serve)}
+
+  tuner:pull
+  {:doc  "Write the color maps in src/sugar/data.cljc to dev/tuner/palette.json."
+   :task (tuner/pull)}
+
+  tuner:push
+  {:doc  "Write dev/tuner/palette.json into the color maps in src/sugar/data.cljc. Run bb test:snapshot after."
+   :task (tuner/push)}
+
+  ;; Dev
+  ;; ---------------------------------------------------------------------------
+  deps:local
+  {:doc  "Use the local supports-color checkout in deps.edn, bb.edn, nbb.edn and shadow-cljs.edn."
+   :task (deps/switch :local)}
+
+  deps:published
+  {:doc  "Use the published supports-color version in deps.edn, bb.edn, nbb.edn and shadow-cljs.edn."
+   :task (deps/switch :published)}
+
+  dev:live-code
+  {:doc  "Reload changed namespaces on every save with test-refresh, for live coding with fireworks. Tests are skipped while :debug is true in .test-refresh.edn."
+   :task (clojure "-M:live-code")}
+
+  dev:browser
+  {:doc  "Start the dev-browser build with shadow-cljs and open http://localhost:9630."
+   :task (do (shell "open" "http://localhost:9630")
+             (shell "npx" "shadow-cljs" "watch" "dev-browser"))}
+
+  ;; Build
+  ;; ---------------------------------------------------------------------------
+  ci
+  {:doc     "Run the CI pipeline of tests and build the JAR."
+   :depends [test:all]
+   :task    (clojure "-T:build" "jar")}
+
+  ci:deploy
+  {:doc     "Run the tests, then build and deploy the JAR to Clojars."
+   :depends [test:all]
+   :task    (run 'deploy)}
+
+  deploy
+  {:doc      "Build the JAR and deploy it to Clojars. Requires CLOJARS_USERNAME and CLOJARS_PASSWORD (a deploy token) in the environment, or a with-clojars-creds command on your PATH that supplies them."
+   :requires ([babashka.fs :as fs])
+   :task     (do (clojure "-T:build" "jar")
+                 (if (fs/which "with-clojars-creds")
+                   (shell "with-clojars-creds" "clojure" "-T:build" "deploy")
+                   (clojure "-T:build" "deploy")))}
+
+  install
+  {:doc     "Install the JAR locally (build via ci)."
+   :depends [ci]
+   :task    (clojure "-T:build" "install")}
+
+  ;; Docs
+  ;; ---------------------------------------------------------------------------
+  docs:readme
+  {:doc  "Update the version numbers in README.md to match the latest tag (v0.2.0 -> 0.2.0). Leaves README.md alone if there are no tags yet."
+   :task (docs/update-readme)}
+
+  docs:git-deps
+  {:doc  "Regenerate doc/git-deps.md from the latest tag.
+          Uses HEAD if there are no tags yet."
+   :task (docs/write-git-deps "doc/git-deps.md")}
+
+  ;; docs:docstrings writes each public fn's docstring from its metadata map
+  ;; (:tldr, :desc, :examples, :options), in place. docs:api reads the
+  ;; docstrings, so run docs:docstrings first.
+  docs:docstrings
+  {:doc        "Write the docstrings of the public fns in sugar.core from their metadata maps, with docmap."
+   :extra-deps {io.github.paintparty/docmap {:local/root "../../cljc/docmap"}}
+   :task       (exec 'docmap.api/docstring)
+   ;; docmap runs cljfmt over each file. These 3 rules would change code that
+   ;; has nothing to do with docstrings, so they are off.
+   :exec-args  {:source-paths         ["src/sugar/core.cljc"]
+                :print-report-banner? false
+                :cljfmt-options       {:indentation?                     false
+                                       :remove-consecutive-blank-lines?  false
+                                       :remove-surrounding-whitespace?   false}}}
+
+  docs:api
+  {:doc        "Write doc/api.md from the docstrings in sugar.core, with quickdoc."
+   :extra-deps {io.github.borkdude/quickdoc {:git/tag "v0.2.5"
+                                             :git/sha "25784ca"}}
+   :task       (exec 'quickdoc.api/quickdoc)
+   :exec-args  {:outfile      "doc/api.md"
+                :git/branch   "main"
+                :github/repo  "https://github.com/paintparty/sugar"
+                :source-paths ["src/sugar/core.cljc"]}}}}

@@ -1,0 +1,30 @@
+{:source-paths ["src" "test" "bench" "dev/browser/src"
+                ;; supports-color comes from the local checkout here, or the
+                ;; published version in :dependencies. Switch with
+                ;; bb deps:local or bb deps:published.
+                "../../cljc/supports-color/src"]
+ :dependencies [[org.clojure/test.check "1.1.3"]
+                [io.github.paintparty/fireworks "0.21.3"]
+                [io.github.paintparty/js-runtime-detection "0.1.0-SNAPSHOT"]
+                #_[io.github.paintparty/supports-color "0.1.0-SNAPSHOT"]]
+ :builds
+ {:test {:target    :node-test
+         :output-to "out/test/node-tests.js"
+         :ns-regexp "-test$"
+         :autorun   false}
+
+  :visual {:target    :node-script
+           :main      sugar.visual/main
+           :output-to "out/visual/visual.js"}
+
+  :bench {:target           :node-script
+          :main             sugar.bench/main
+          :output-to        "out/bench/bench.js"
+          :compiler-options {:optimizations :advanced}}
+
+  :dev-browser {:target     :browser
+                :modules    {:main {:init-fn sugar.browser/init}}
+                :output-dir "dev/browser/public/js"
+                :asset-path "/js"
+                :devtools   {:http-root "dev/browser/public"
+                             :http-port 9630}}}}

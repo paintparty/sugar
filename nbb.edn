@@ -1,0 +1,4 @@
+;; Dependencies for `bb test:nbb` and the nbb step of `bb visual:*`. supports-color brings
+;; js-runtime-detection with it.
+{:deps {;; The local checkout or the published version. Switch with bb deps:local or bb deps:published.
+        io.github.paintparty/supports-color {:local/root "../../cljc/supports-color"}}}

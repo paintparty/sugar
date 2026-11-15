@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // palette.json comes from the bb tuner server. Alpine starts after it
+        // loads, so colorApp() can read window.PALETTE synchronously.
+        const domReady = new Promise(r => document.addEventListener('DOMContentLoaded', r));
+        Promise.all([fetch('palette.json', {cache: 'no-store'}).then(r => {
+                         if (!r.ok) throw new Error(r.status);
+                         return r.json();
+                     }), domReady])
+            .then(([palette]) => {
+                window.PALETTE = palette;
+                const alpine = document.createElement('script');
+                alpine.src = 'https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js';
+                document.head.appendChild(alpine);
+            })
+            .catch(() => domReady.then(() => {
+                document.body.innerHTML =
+                    '<p style="font-family: monospace; padding: 2rem">Could not load palette.json. ' +
+                    'Run <b>bb tuner</b> in the sugar repo and use the page it opens.</p>';
+            }));
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
+    <style>
+        .color-swatch { height: 10px; width: 10px; border: 1px solid rgba(128,128,128,0.3); flex-shrink: 0; border-radius: 9999px; }
+        
+        .palette-container {
+            padding: 8px;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 6px;
+            width: max-content;
+        }
+        
+        .palette-grid { 
+            display: grid; 
+            grid-template-columns: repeat(16, 1fr); 
+            gap: 2px; 
+        }
+        .palette-item { width: 20px; height: 20px; cursor: pointer; border-radius: 2px; transition: transform 0.1s; }
+        .palette-item:hover { transform: scale(1.25); outline: 1px solid white; z-index: 10; }
+        
+        .selected-color { transform: scale(1.25); outline: 2px solid white; outline-offset: 1px; z-index: 20; box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
+
+        /* Custom Range Slider styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-runnable-track { height: 2px; background: #888; border-radius: 1px; }
+        input[type=range]::-moz-range-track { height: 2px; background: #888; border-radius: 1px; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; height: 20px; width: 20px;
+            background: #9ca3af; border: 1px solid #6b7280; border-radius: 50%; cursor: pointer;
+            margin-top: -9px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input[type=range]::-moz-range-thumb {
+            height: 20px; width: 20px; background: #9ca3af; border: 1px solid #6b7280;
+            border-radius: 50%; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        input[type=checkbox] { accent-color: #4f46e5; cursor: pointer; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 4px; }
+
+        /* Truecolor Picker Frame overrides */
+        .IroWheel { margin-bottom: 12px !important; }
+    </style>
+</head>
+<body x-data="colorApp()" class="antialiased overflow-hidden relative">
+
+    <div class="fixed right-6 top-1/4 z-[200] flex flex-col gap-3 pointer-events-auto">
+        
+        <div class="flex items-center bg-transparent border border-gray-500/50 rounded-full p-1 w-44">
+            <label class="flex-1 text-center cursor-pointer relative">
+                <input type="radio" name="mode" value="8bit" x-model="settings.mode" @change="closePicker()" class="sr-only">
+                <span class="block py-1 text-[10px] font-mono uppercase font-bold rounded-full transition-colors"
+                      :class="settings.mode === '8bit' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-400'">8-bit</span>
+            </label>
+            <label class="flex-1 text-center cursor-pointer relative">
+                <input type="radio" name="mode" value="truecolor" x-model="settings.mode" @change="closePicker()" class="sr-only">
+                <span class="block py-1 text-[10px] font-mono uppercase font-bold rounded-full transition-colors"
+                      :class="settings.mode === 'truecolor' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-400'">Truecolor</span>
+            </label>
+        </div>
+
+        <div class="flex items-center bg-transparent border border-gray-500/50 rounded-full p-1 w-44 mb-2">
+            <label class="flex-1 text-center cursor-pointer relative">
+                <input type="radio" name="layout" value="dark" x-model="settings.layoutMode" class="sr-only">
+                <span class="block py-1 text-[10px] font-mono uppercase font-bold rounded-full transition-colors"
+                      :class="settings.layoutMode === 'dark' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-400'">Dark</span>
+            </label>
+            <label class="flex-1 text-center cursor-pointer relative">
+                <input type="radio" name="layout" value="both" x-model="settings.layoutMode" class="sr-only">
+                <span class="block py-1 text-[10px] font-mono uppercase font-bold rounded-full transition-colors"
+                      :class="settings.layoutMode === 'both' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-400'">Both</span>
+            </label>
+            <label class="flex-1 text-center cursor-pointer relative">
+                <input type="radio" name="layout" value="light" x-model="settings.layoutMode" class="sr-only">
+                <span class="block py-1 text-[10px] font-mono uppercase font-bold rounded-full transition-colors"
+                      :class="settings.layoutMode === 'light' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-400'">Light</span>
+            </label>
+        </div>
+        
+        <button @click="resetMap()" class="flex items-center justify-center bg-transparent hover:bg-gray-500/10 border border-gray-500/50 text-gray-500 font-mono text-xs py-2 px-3 rounded-full transition-colors w-44 text-center">
+            <span x-text="resetting ? 'Reset!' : 'Reset'"></span>
+        </button>
+        <button @click="saveMap()" class="flex items-center justify-center bg-transparent hover:bg-gray-500/10 border border-gray-500/50 text-gray-500 font-mono text-xs py-2 px-3 rounded-full transition-colors w-44 text-center mb-2">
+            <span x-text="saving ? 'Saved!' : 'Save'"></span>
+        </button>
+
+        <label class="flex items-center justify-start gap-3 pl-4 bg-transparent hover:bg-gray-500/10 text-gray-500 font-mono text-[10px] uppercase tracking-wider font-bold py-2 rounded-full transition-colors w-44 cursor-pointer select-none">
+            <input type="checkbox" x-model="settings.showMediums" class="w-3 h-3">
+            <span>Show Mediums</span>
+        </label>
+    </div>
+
+    <div x-show="activePicker && settings.mode === '8bit'" 
+         @click.away="closePicker()"
+         @mouseleave="clearPreview()"
+         class="fixed z-[300] shadow-2xl palette-container flex flex-col gap-3"
+         :style="settings.mode === '8bit' ? popoverStyle : 'display: none !important;'">
+        <div class="palette-grid">
+            <template x-for="n in 241" :key="n">
+                <div @click.stop="updateColor(n + 15)"
+                     @mouseenter="previewColor(n + 15)"
+                     class="palette-item"
+                     :class="isActiveColor(n + 15) ? 'selected-color' : ''"
+                     :title="`Color ${n + 15}`"
+                     :style="`background-color: var(--color-${n + 15})`">
+                </div>
+            </template>
+        </div>
+        <div class="w-full px-1 pb-1">
+            <input type="text" x-model="edit8BitValue" @input="handle8BitInput" class="w-full bg-[#111] text-gray-300 font-mono text-center text-lg py-2 rounded border border-[#444] focus:outline-none focus:border-white shadow-inner transition-colors">
+        </div>
+    </div>
+
+    <div x-show="activePicker && settings.mode === 'truecolor'" 
+         @click.away="closePicker()"
+         class="fixed z-[300] shadow-2xl bg-[#222] border border-[#444] rounded-[6px] p-4 flex flex-col items-center justify-center gap-4"
+         :style="settings.mode === 'truecolor' ? popoverStyle : 'display: none !important;'">
+        <div id="truecolor-picker-container"></div>
+        <div class="w-full">
+            <input type="text" x-model="editTruecolorValue" @input="handleTruecolorInput" class="w-full bg-[#111] text-gray-300 font-mono text-center text-lg py-2 rounded border border-[#444] focus:outline-none focus:border-white shadow-inner transition-colors" placeholder="e.g. 255, 0, 0">
+        </div>
+    </div>
+
+    <div class="flex h-screen w-full relative z-0">
+        <div x-show="showDarkCol" 
+             class="overflow-y-auto p-8 border-r border-gray-800 transition-all duration-300 flex-shrink-0"
+             :class="settings.layoutMode === 'both' ? 'w-1/2' : 'w-full'"
+             :style="`background-color: hsl(0, 0%, ${settings.darkBg}%)`">
+            
+            <div class="flex items-start justify-start gap-36 mb-8 w-full">
+                <h2 class="text-gray-400 text-xs uppercase tracking-widest mt-1">Dark Mode</h2>
+                <div class="flex items-center min-w-[333px]">
+                    <input type="range" min="0" max="75" x-model="settings.darkBg" class="w-full" title="Adjust Lightness">
+                    <span class="font-mono text-[12px] ml-4 text-gray-400" x-text="`${settings.darkBg}%`"></span>
+                </div>
+            </div>
+
+            <template x-for="(val, key) in colorMap" :key="key">
+                <div x-show="(settings.showMediums || !key.startsWith('medium-')) && !key.includes('black') && !key.startsWith('extra-dark-') && !key.startsWith('dark-') && !key.startsWith('shadow-')"
+                     @click.stop="togglePicker('dark', key, $event)"
+                     class="grid grid-cols-[100px_10px_1fr] max-w-[320px] gap-4 items-center p-0.5 -ml-1 text-[16px] leading-tight rounded-[999px] border border-transparent cursor-pointer hover:border-[hsl(0deg_0%_100%/28%)] transition-colors duration-100">
+                    
+                    <span class="font-mono text-[12px] text-gray-400 text-right whitespace-nowrap" x-text="formatVal(getDisplayRaw(key))"></span>
+
+                    <div class="color-swatch rounded-full shadow-sm" 
+                         :style="`background-color: ${getDisplayStyle(getDisplayRaw(key))}`">
+                    </div>
+
+                    <span class="font-mono whitespace-nowrap w-fit"
+                          :style="`color: ${getDisplayStyle(getDisplayRaw(key))}`"
+                          x-text="`:${key}`">
+                    </span>
+                </div>
+            </template>
+
+            <div class="mt-16 pt-8 border-t border-gray-800">
+                <h2 class="text-gray-400 text-xs uppercase tracking-widest mb-8">Variant Matrix</h2>
+                <div class="flex flex-col gap-3">
+                    <div class="grid grid-cols-4 gap-1">
+                        <template x-for="variant in ['baseline', 'soft', 'background']" :key="variant">
+                            <div class="flex flex-col gap-1">
+                                <h3 class="text-gray-400 text-xs uppercase tracking-widest mb-1" x-text="variant === 'baseline' ? 'base' : variant"></h3>
+                                
+                                <template x-if="variant !== 'background'">
+                                    <template x-for="base in baseColors" :key="base">
+                                        <span x-show="colorMap[getKey(variant, base)] !== undefined && base !== 'gray'"
+                                              @click.stop="togglePicker('dark', getKey(variant, base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey(variant, base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+
+                                <template x-if="variant === 'background'">
+                                    <template x-for="base in baseColors" :key="base">
+                                        <span @click.stop="togglePicker('dark', getKey('shadow', base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit px-1 rounded -ml-1" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey('extra-light', base)))}; background-color: ${getDisplayStyle(getDisplayRaw(getKey('shadow', base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="grid grid-cols-4 gap-1 mt-4">
+                        <template x-for="variant in ['extra-light', 'light', 'dark', 'extra-dark']" :key="variant">
+                            <div class="flex flex-col gap-1">
+                                <h3 class="text-gray-400 text-xs uppercase tracking-widest mb-1" x-text="variant"></h3>
+                                <template x-for="base in baseColors" :key="base">
+                                    <template x-if="colorMap[getKey(variant, base)] !== undefined && base !== 'gray'">
+                                        <span @click.stop="togglePicker('dark', getKey(variant, base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey(variant, base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="showLightCol"
+             class="overflow-y-auto p-8 transition-all duration-300 flex-shrink-0"
+             :class="settings.layoutMode === 'both' ? 'w-1/2' : 'w-full'"
+             :style="`background-color: hsl(0, 0%, ${100 - settings.lightSlider}%)`">
+            
+            <div class="flex items-start justify-start gap-36 mb-8 w-full">
+                <h2 class="text-gray-500 text-xs uppercase tracking-widest mt-1">Light Mode</h2>
+                <div class="flex items-center min-w-[333px]">
+                    <input type="range" min="0" max="75" x-model="settings.lightSlider" class="w-full" title="Adjust Darkness">
+                    <span class="font-mono text-[12px] ml-4 text-gray-500" x-text="`${100 - settings.lightSlider}%`"></span>
+                </div>
+            </div>
+
+            <template x-for="(val, key) in colorMap" :key="key">
+                <div x-show="(settings.showMediums || !key.startsWith('medium-')) && !key.includes('white') && !key.startsWith('extra-light-') && !key.startsWith('light-') && !key.startsWith('highlight-')"
+                     @click.stop="togglePicker('light', key, $event)"
+                     class="grid grid-cols-[100px_10px_1fr] max-w-[320px] gap-4 items-center p-0.5 -ml-1 text-[16px] leading-tight rounded-[999px] border border-transparent cursor-pointer hover:border-[hsl(0deg_0%_0%/16%)] transition-colors duration-100">
+                    
+                    <span class="font-mono text-[12px] text-gray-500 text-right whitespace-nowrap" x-text="formatVal(getDisplayRaw(key))"></span>
+                    
+                    <div class="color-swatch rounded-full shadow-sm" 
+                         :style="`background-color: ${getDisplayStyle(getDisplayRaw(key))}`">
+                    </div>
+                    
+                    <span class="font-mono whitespace-nowrap w-fit"
+                          :style="`color: ${getDisplayStyle(getDisplayRaw(key))}`"
+                          x-text="`:${key}`">
+                    </span>
+                </div>
+            </template>
+
+            <div class="mt-16 pt-8 border-t border-gray-300">
+                <h2 class="text-gray-500 text-xs uppercase tracking-widest mb-8">Variant Matrix</h2>
+                <div class="flex flex-col gap-3">
+                    <div class="grid grid-cols-4 gap-1">
+                        <template x-for="variant in ['baseline', 'soft', 'background']" :key="variant">
+                            <div class="flex flex-col gap-1">
+                                <h3 class="text-gray-500 text-xs uppercase tracking-widest mb-1" x-text="variant === 'baseline' ? 'base' : variant"></h3>
+                                
+                                <template x-if="variant !== 'background'">
+                                    <template x-for="base in baseColors" :key="base">
+                                        <span x-show="colorMap[getKey(variant, base)] !== undefined && base !== 'gray'"
+                                              @click.stop="togglePicker('light', getKey(variant, base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey(variant, base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+
+                                <template x-if="variant === 'background'">
+                                    <template x-for="base in baseColors" :key="base">
+                                        <span @click.stop="togglePicker('light', getKey('highlight', base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit px-1 rounded -ml-1" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey('extra-dark', base)))}; background-color: ${getDisplayStyle(getDisplayRaw(getKey('highlight', base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="grid grid-cols-4 gap-1 mt-4">
+                        <template x-for="variant in ['extra-light', 'light', 'dark', 'extra-dark']" :key="variant">
+                            <div class="flex flex-col gap-1">
+                                <h3 class="text-gray-500 text-xs uppercase tracking-widest mb-1" x-text="variant"></h3>
+                                <template x-for="base in baseColors" :key="base">
+                                    <template x-if="colorMap[getKey(variant, base)] !== undefined && base !== 'gray'">
+                                        <span @click.stop="togglePicker('light', getKey(variant, base), $event)" 
+                                              class="font-mono text-[16px] leading-tight cursor-pointer hover:underline w-fit" 
+                                              :style="`color: ${getDisplayStyle(getDisplayRaw(getKey(variant, base)))}`" 
+                                              x-text="`:${base}`">
+                                        </span>
+                                    </template>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style id="xterm-colors"></style>
+
+    <script>
+        const styleEl = document.getElementById('xterm-colors');
+        let css = ":root {\n";
+        for (let i = 0; i < 256; i++) {
+            let r, g, b;
+            if (i < 16) {
+                const ansi = [
+                    [0,0,0],[128,0,0],[0,128,0],[128,128,0],[0,0,128],[128,0,128],[0,128,128],[192,192,192],
+                    [128,128,128],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255]
+                ];
+                [r, g, b] = ansi[i];
+            } else if (i < 232) {
+                let j = i - 16;
+                const steps = [0, 95, 135, 175, 215, 255]; 
+                r = steps[Math.floor(j / 36)];
+                g = steps[Math.floor((j % 36) / 6)];
+                b = steps[j % 6];
+            } else {
+                let v = (i - 232) * 10 + 8;
+                [r, g, b] = [v, v, v];
+            }
+            css += `--color-${i}: rgb(${r}, ${g}, ${b});\n`;
+        }
+        css += "}";
+        styleEl.innerHTML = css;
+
+        function colorApp() {
+            // One entry per color: {"truecolor": [r, g, b], "8bit": n}
+            const palette = window.PALETTE;
+            const loadedMap = {};
+            const loadedTrueColorMap = {};
+            for (const key in palette) {
+                loadedMap[key] = palette[key]['8bit'];
+                loadedTrueColorMap[key] = palette[key].truecolor;
+            }
+
+            const storedSettingsString = localStorage.getItem('colorExplorerSettings');
+            const loadedSettings = storedSettingsString ? JSON.parse(storedSettingsString) : null;
+
+            const defaultSettings = {
+                mode: '8bit', 
+                layoutMode: 'both', 
+                showMediums: false, 
+                darkBg: 0,
+                lightSlider: 0, 
+            };
+
+            const mergedSettings = { ...defaultSettings, ...(loadedSettings || {}) };
+
+            return {
+                settings: mergedSettings,
+                savedSettings: { ...mergedSettings },
+
+                get showDarkCol() { return this.settings.layoutMode === 'both' || this.settings.layoutMode === 'dark'; },
+                get showLightCol() { return this.settings.layoutMode === 'both' || this.settings.layoutMode === 'light'; },
+                
+                activePicker: null,
+                activeKey: null,
+                popoverStyle: '',
+                previewKey: null,
+                previewVal: null,
+                
+                edit8BitValue: '',
+                editTruecolorValue: '',
+                
+                saving: false,
+                resetting: false,
+                
+                colorMap: { ...loadedMap },
+                savedMap: { ...loadedMap },
+
+                trueColorMap: { ...loadedTrueColorMap },
+                savedTrueColorMap: { ...loadedTrueColorMap },
+
+                baseColors: ['red', 'orange', 'yellow', 'olive', 'green', 'cyan', 'blue', 'purple', 'magenta', 'gray'],
+                
+                iroPicker: null,
+                isSettingIro: false,
+
+                initIro() {
+                    if (!this.iroPicker) {
+                        this.iroPicker = new iro.ColorPicker('#truecolor-picker-container', {
+                            width: 320, // 376 * 0.85
+                            color: "rgb(255, 255, 255)",
+                            layoutDirection: 'vertical',
+                            layout: [
+                                { component: iro.ui.Wheel, options: {} },
+                                { component: iro.ui.Slider, options: { sliderType: 'value' } }
+                            ]
+                        });
+                        this.iroPicker.on('color:change', (color) => {
+                            if (this.activeKey && this.settings.mode === 'truecolor' && !this.isSettingIro) {
+                                this.trueColorMap[this.activeKey] = [color.rgb.r, color.rgb.g, color.rgb.b];
+                                this.editTruecolorValue = `${color.rgb.r}, ${color.rgb.g}, ${color.rgb.b}`;
+                            }
+                        });
+                    }
+                },
+
+                getAnsiRgb(i) {
+                    if (i < 16) {
+                        const ansi = [
+                            [0,0,0],[128,0,0],[0,128,0],[128,128,0],[0,0,128],[128,0,128],[0,128,128],[192,192,192],
+                            [128,128,128],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255]
+                        ];
+                        return ansi[i];
+                    } else if (i < 232) {
+                        let j = i - 16;
+                        const steps = [0, 95, 135, 175, 215, 255]; 
+                        return [steps[Math.floor(j / 36)], steps[Math.floor((j % 36) / 6)], steps[j % 6]];
+                    } else {
+                        let v = (i - 232) * 10 + 8;
+                        return [v, v, v];
+                    }
+                },
+
+                getDisplayRaw(key) {
+                    let activeMap = this.settings.mode === '8bit' ? this.colorMap : this.trueColorMap;
+                    return this.previewKey === key ? this.previewVal : activeMap[key];
+                },
+                formatVal(val) {
+                    return Array.isArray(val) ? `[${val.join(' ')}]` : val;
+                },
+                getDisplayStyle(val) {
+                    return Array.isArray(val) ? `rgb(${val.join(',')})` : `var(--color-${val})`;
+                },
+                
+                getKey(variant, base) {
+                    return variant === 'baseline' ? base : `${variant}-${base}`;
+                },
+
+                togglePicker(col, key, event) {
+                    const identifier = `${col}-${key}`;
+                    if (this.activePicker === identifier) {
+                        this.closePicker();
+                        return;
+                    }
+                    
+                    this.activePicker = identifier;
+                    this.activeKey = key;
+                    
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    
+                    // Smart Y-Axis Position
+                    const isBottomHalf = rect.top > (window.innerHeight / 2);
+                    let verticalStyle = isBottomHalf 
+                        ? `bottom: ${window.innerHeight - rect.bottom - 8}px; top: auto;`
+                        : `top: ${Math.max(8, rect.top - 8)}px; bottom: auto;`;
+                    
+                    // Unified X-Axis Translate setting
+                    let horizontalStyle = `left: ${rect.left}px;`;
+                    let transformX = '100%';
+                    let transformStyle = `transform: translateX(${transformX});`;
+                    
+                    this.popoverStyle = `${verticalStyle} ${horizontalStyle} ${transformStyle}`;
+
+                    // Handle init and bindings
+                    if (this.settings.mode === 'truecolor') {
+                        const rgb = this.trueColorMap[key];
+                        if (rgb) {
+                            this.editTruecolorValue = rgb.join(', ');
+                            this.$nextTick(() => {
+                                this.initIro();
+                                this.isSettingIro = true; 
+                                this.iroPicker.color.rgb = { r: rgb[0], g: rgb[1], b: rgb[2] };
+                                this.isSettingIro = false;
+                            });
+                        }
+                    } else {
+                        const code = this.colorMap[key];
+                        if (code !== undefined) {
+                            this.edit8BitValue = code.toString();
+                        }
+                        this.clearPreview();
+                    }
+                },
+
+                closePicker() {
+                    this.activePicker = null;
+                    this.activeKey = null;
+                    this.clearPreview();
+                },
+                
+                handle8BitInput() {
+                    let val = parseInt(this.edit8BitValue, 10);
+                    if (!isNaN(val) && val >= 0 && val <= 255) {
+                        this.colorMap[this.activeKey] = val;
+                    }
+                },
+                
+                handleTruecolorInput() {
+                    let match = this.editTruecolorValue.match(/\b([0-9]{1,3})\b/g);
+                    if (match && match.length === 3) {
+                        let r = parseInt(match[0], 10);
+                        let g = parseInt(match[1], 10);
+                        let b = parseInt(match[2], 10);
+                        if (r <= 255 && g <= 255 && b <= 255) {
+                            this.trueColorMap[this.activeKey] = [r, g, b];
+                            if (this.iroPicker) {
+                                this.isSettingIro = true;
+                                this.iroPicker.color.rgb = { r, g, b };
+                                this.isSettingIro = false;
+                            }
+                        }
+                    }
+                },
+
+                isActiveColor(code) {
+                    if (!this.activeKey) return false;
+                    if (this.settings.mode === '8bit') {
+                        return this.colorMap[this.activeKey] === code;
+                    } else {
+                        let rgb = this.getAnsiRgb(code);
+                        let current = this.trueColorMap[this.activeKey];
+                        return current && current[0]===rgb[0] && current[1]===rgb[1] && current[2]===rgb[2];
+                    }
+                },
+
+                previewColor(code) {
+                    if (this.activeKey) {
+                        this.previewKey = this.activeKey;
+                        this.previewVal = this.settings.mode === '8bit' ? code : this.getAnsiRgb(code);
+                    }
+                },
+                clearPreview() {
+                    this.previewKey = null;
+                    this.previewVal = null;
+                },
+                updateColor(code) {
+                    if (this.activeKey && this.settings.mode === '8bit') {
+                        this.colorMap[this.activeKey] = code;
+                    }
+                    this.closePicker();
+                },
+
+                async saveMap() {
+                    const palette = {};
+                    for (const key in this.colorMap) {
+                        palette[key] = { truecolor: this.trueColorMap[key], '8bit': this.colorMap[key] };
+                    }
+                    let res;
+                    try {
+                        res = await fetch('palette.json', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(palette)
+                        });
+                    } catch (e) {
+                        alert('Save failed. Is bb tuner still running?');
+                        return;
+                    }
+                    if (!res.ok) {
+                        alert('Save failed: ' + await res.text());
+                        return;
+                    }
+                    localStorage.setItem('colorExplorerSettings', JSON.stringify(this.settings));
+
+                    this.savedMap = { ...this.colorMap };
+                    this.savedTrueColorMap = { ...this.trueColorMap };
+                    this.savedSettings = { ...this.settings };
+                    
+                    this.saving = true;
+                    setTimeout(() => { this.saving = false; }, 2000);
+                },
+                resetMap() {
+                    this.colorMap = { ...this.savedMap };
+                    this.trueColorMap = { ...this.savedTrueColorMap };
+                    this.settings = { ...this.savedSettings };
+                    
+                    this.resetting = true;
+                    setTimeout(() => { this.resetting = false; }, 1000);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

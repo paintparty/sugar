@@ -1,0 +1,103 @@
+sugar benchmarks before and after the Phase 3 changes, 2026-11-13.
+
+The changes: sugar.core merges the process context once instead of on every
+call, caches opts as passed (a string is parsed only on a miss), and keys the
+cache on the opts alone. sugar.utils/rgb->8-bit no longer calls Math/round by
+reflection. :validate-options now defaults to true.
+
+Machine: Intel Core i5-8500B, 6 cores, macOS 15.5, load average 3 to 9.
+"Before" is the committed source as of the baseline, run back to back with
+"after" on the same build of the bench. Ratio is before / after, so above 1
+is faster.
+
+Rows for code the changes do not touch (empty cache, mocked context, browser
+convert) show the run-to-run drift: 0.5x to 1.5x on Babashka and Node, 0.88x
+to 1.26x on the JVM. Only differences outside that range mean anything.
+
+== JVM, criterium quick-benchmark mean (bb bench:jvm), one round ==
+| scenario                           | L3 before | L3 after  | ratio  | L1 before | L1 after  | ratio  |
+|---|---|---|---|---|---|---|
+| map opts, cache hit                | 414 ns    | 220 ns    | 1.88x  | 575 ns    | 235 ns    | 2.45x  |
+| 6-key map opts, cache hit          | 502 ns    | 327 ns    | 1.54x  | 577 ns    | 316 ns    | 1.83x  |
+| string opts, cache hit             | 1.32 us   | 225 ns    | 5.87x  | 1.18 us   | 216 ns    | 5.46x  |
+| 5-token string opts, cache hit     | 2.22 us   | 242 ns    | 9.17x  | 2.96 us   | 228 ns    | 12.98x |
+| :validate-options true, cache hit  | 526 ns    | 322 ns    | 1.63x  | 806 ns    | 307 ns    | 2.63x  |
+| map opts, miss                     | 6.52 us   | 2.20 us   | 2.96x  | 4.55 us   | 3.52 us   | 1.29x  |
+| 6-key map opts, miss               | 9.51 us   | 4.05 us   | 2.35x  | 10.08 us  | 5.13 us   | 1.96x  |
+| string opts, miss                  | 4.16 us   | 5.05 us   | 0.82x  | 6.49 us   | 4.53 us   | 1.43x  |
+| rgb fg and bg, miss                | 2.71 us   | 3.38 us   | 0.80x  | 18.52 us  | 4.84 us   | 3.83x  |
+| hex fg, miss                       | 7.14 us   | 3.07 us   | 2.33x  | 11.29 us  | 5.03 us   | 2.24x  |
+| 8-bit fg, miss                     | 1.81 us   | 1.30 us   | 1.39x  | 1.54 us   | 1.46 us   | 1.05x  |
+| :validate-options true, miss       | 3.60 us   | 2.58 us   | 1.40x  | 3.89 us   | 3.46 us   | 1.12x  |
+| empty cache, no-op                 | 21 ns     | 5 ns      | 4.20x  | 12 ns     | 8 ns      | 1.50x  |
+| mocked context (3rd arg)           | 1.26 ms   | 1.00 ms   | 1.26x  | 1.15 ms   | 1.31 ms   | 0.88x  |
+| browser convert, 1 span            | 15.04 us  | 12.70 us  | 1.18x  | 12.93 us  | 13.82 us  | 0.94x  |
+| browser convert, 64 spans          | 942.13 us | 786.94 us | 1.20x  | 827.70 us | 856.99 us | 0.97x  |
+
+
+== Babashka and Node, median of 7 batches (bb bench:bb, bb bench:node) ==
+Two rounds, run in the order before, after, before, after. Times are from round 2.
+
+Babashka (median), ratio = before / after, per round
+| scenario | L3 before (r2) | L3 after (r2) | L3 ratio r1, r2 | L1 before (r2) | L1 after (r2) | L1 ratio r1, r2 |
+|---|---|---|---|---|---|---|
+| map opts, cache hit | 4.34 us | 2.20 us | 1.15x, 1.97x | 3.09 us | 2.51 us | 1.34x, 1.23x |
+| 6-key map opts, cache hit | 4.55 us | 2.18 us | 0.97x, 2.09x | 3.04 us | 2.91 us | 1.17x, 1.04x |
+| string opts, cache hit | 5.65 us | 1.76 us | 2.07x, 3.21x | 5.39 us | 2.04 us | 2.25x, 2.64x |
+| 5-token string opts, cache hit | 7.65 us | 1.80 us | 3.35x, 4.25x | 8.46 us | 1.78 us | 3.77x, 4.75x |
+| :validate-options true, cache hit | 2.88 us | 1.92 us | 1.46x, 1.50x | 3.27 us | 1.87 us | 1.28x, 1.75x |
+| map opts, miss | 13.08 us | 11.90 us | 1.46x, 1.10x | 16.92 us | 13.32 us | 0.91x, 1.27x |
+| 6-key map opts, miss | 19.34 us | 18.64 us | 1.12x, 1.04x | 23.34 us | 18.61 us | 0.87x, 1.25x |
+| string opts, miss | 14.54 us | 14.42 us | 0.69x, 1.01x | 18.95 us | 14.76 us | 0.79x, 1.28x |
+| rgb fg and bg, miss | 10.87 us | 11.40 us | 0.87x, 0.95x | 42.46 us | 36.22 us | 0.91x, 1.17x |
+| hex fg, miss | 12.33 us | 13.12 us | 0.93x, 0.94x | 35.40 us | 30.47 us | 0.89x, 1.16x |
+| 8-bit fg, miss | 7.38 us | 7.45 us | 0.98x, 0.99x | 13.03 us | 11.30 us | 0.92x, 1.15x |
+| :validate-options true, miss | 19.35 us | 13.37 us | 1.02x, 1.45x | 15.85 us | 13.74 us | 0.89x, 1.15x |
+| empty cache, no-op | 194 ns | 314 ns | 0.91x, 0.62x | 172 ns | 177 ns | 0.75x, 0.97x |
+| mocked context (3rd arg) | 268.31 us | 440.29 us | 0.85x, 0.61x | 260.89 us | 279.68 us | 0.81x, 0.93x |
+| browser convert, 1 span | 23.24 us | 44.65 us | 0.83x, 0.52x | 23.87 us | 25.28 us | 0.91x, 0.94x |
+| browser convert, 64 spans | 1.74 ms | 2.48 ms | 0.71x, 0.70x | 1.45 ms | 1.59 ms | 1.11x, 0.91x |
+
+Node (median), ratio = before / after, per round
+| scenario | L3 before (r2) | L3 after (r2) | L3 ratio r1, r2 | L1 before (r2) | L1 after (r2) | L1 ratio r1, r2 |
+|---|---|---|---|---|---|---|
+| map opts, cache hit | 1.53 us | 265 ns | 10.12x, 5.77x | 2.71 us | 340 ns | 8.32x, 7.97x |
+| 6-key map opts, cache hit | 1.58 us | 324 ns | 12.37x, 4.88x | 2.58 us | 426 ns | 7.69x, 6.06x |
+| string opts, cache hit | 3.80 us | 622 ns | 10.75x, 6.11x | 6.38 us | 918 ns | 8.78x, 6.95x |
+| 5-token string opts, cache hit | 6.37 us | 637 ns | 15.39x, 10.00x | 10.05 us | 856 ns | 12.69x, 11.74x |
+| :validate-options true, cache hit | 2.04 us | 492 ns | 6.29x, 4.15x | 2.75 us | 635 ns | 4.06x, 4.33x |
+| map opts, miss | 10.03 us | 5.71 us | 2.07x, 1.76x | 13.84 us | 9.01 us | 1.60x, 1.54x |
+| 6-key map opts, miss | 14.05 us | 9.97 us | 2.00x, 1.41x | 21.16 us | 14.71 us | 1.57x, 1.44x |
+| string opts, miss | 11.23 us | 9.20 us | 1.97x, 1.22x | 14.98 us | 13.89 us | 1.35x, 1.08x |
+| rgb fg and bg, miss | 5.95 us | 5.17 us | 2.06x, 1.15x | 9.64 us | 9.62 us | 1.48x, 1.00x |
+| hex fg, miss | 6.35 us | 5.67 us | 1.78x, 1.12x | 7.88 us | 8.17 us | 1.51x, 0.96x |
+| 8-bit fg, miss | 4.39 us | 4.50 us | 1.86x, 0.98x | 5.54 us | 5.66 us | 1.09x, 0.98x |
+| :validate-options true, miss | 7.88 us | 7.50 us | 1.74x, 1.05x | 9.06 us | 10.07 us | 1.32x, 0.90x |
+| empty cache, no-op | 10 ns | 12 ns | 1.11x, 0.83x | 9 ns | 12 ns | 0.77x, 0.75x |
+| mocked context (3rd arg) | 246.68 us | 361.69 us | 1.23x, 0.68x | 226.83 us | 319.82 us | 0.84x, 0.71x |
+| browser convert, 1 span | 16.91 us | 24.55 us | 1.31x, 0.69x | 17.81 us | 23.10 us | 0.73x, 0.77x |
+| browser convert, 64 spans | 1.02 ms | 1.34 ms | 1.50x, 0.76x | 959.16 us | 1.37 ms | 0.62x, 0.70x |
+
+== Load time, (require 'sugar.core) in a fresh process (bb bench:load) ==
+Before, JVM then Babashka:
+require 1305.1 ms, first styled call 8.6 ms
+require 844.8 ms, first styled call 6.5 ms
+require 1247.5 ms, first styled call 5.6 ms
+require 1160.1 ms, first styled call 8.9 ms
+require 1013.5 ms, first styled call 8.8 ms
+require 132.1 ms, first styled call 0.8 ms
+require 129.2 ms, first styled call 0.7 ms
+require 123.9 ms, first styled call 0.7 ms
+require 130.9 ms, first styled call 0.8 ms
+require 124.6 ms, first styled call 0.7 ms
+After, JVM then Babashka:
+require 879.4 ms, first styled call 5.7 ms
+require 757.1 ms, first styled call 7.0 ms
+require 753.9 ms, first styled call 5.7 ms
+require 887.9 ms, first styled call 6.4 ms
+require 800.1 ms, first styled call 5.8 ms
+require 103.9 ms, first styled call 0.6 ms
+require 105.7 ms, first styled call 0.6 ms
+require 116.0 ms, first styled call 0.6 ms
+require 112.7 ms, first styled call 0.6 ms
+require 113.1 ms, first styled call 0.6 ms

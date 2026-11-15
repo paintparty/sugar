@@ -3,7 +3,8 @@
          io.github.paintparty/supports-color #_{:local/root "../supports-color"}
                                              {:mvn/version "0.1.1"}}
  :tasks
- {:requires ([tasks.deps :as deps]
+ {:requires ([tasks.clojars :as clojars]
+             [tasks.deps :as deps]
              [tasks.docs :as docs]
              [tasks.tuner :as tuner]
              [tasks.visual :as visual])
@@ -186,6 +187,10 @@
                  (if (fs/which "with-clojars-creds")
                    (shell "with-clojars-creds" "clojure" "-T:build" "deploy")
                    (clojure "-T:build" "deploy")))}
+
+  clojars-info
+  {:doc  "Print the latest release and the Clojars record for the lib in build.clj."
+   :task (clojars/info)}
 
   install
   {:doc     "Install the JAR locally (build via ci)."
